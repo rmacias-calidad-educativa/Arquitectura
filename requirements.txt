@@ -1,6 +1,9 @@
-openai>=1.0.0
+streamlit
 pandas
 openpyxl
 xlsxwriter
 python-dotenv
-streamlit
+openai>=1.0.0
+gspread
+gspread-dataframe
+google-auth

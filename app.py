@@ -6,7 +6,7 @@ import streamlit as st
 import pandas as pd
 from dotenv import load_dotenv
 
-from pipeline import run_pipeline, COMPONENTS_CATALOG
+from pipeline import run_pipeline, COMPONENTS_CATALOG, append_to_excel
 
 load_dotenv()
 
@@ -21,9 +21,19 @@ st.write(
     "se generan instancias verificadoras, componentes y rúbricas por nivel."
 )
 
+# ----------------- Ruta fija en Drive -----------------
+# Es la misma que usabas en tu notebook original
+DRIVE_EXCEL_PATH = "/content/drive/MyDrive/Colab Notebooks/Arquitectura de evaluación/instancias_verificadoras.xlsx"
+SHEET_NAME = "Instancias"
+
+st.caption(
+    f"⚙️ Los resultados se irán acumulando en el archivo maestro de Drive:\n\n`{DRIVE_EXCEL_PATH}`"
+)
+
 # ----------------- Sidebar: configuración -----------------
 st.sidebar.header("Configuración")
 
+# API KEY
 default_key = os.getenv("OPENAI_API_KEY", "")
 api_key = st.sidebar.text_input(
     "OPENAI_API_KEY",
@@ -35,6 +45,7 @@ api_key = st.sidebar.text_input(
 if api_key:
     os.environ["OPENAI_API_KEY"] = api_key
 
+# Área / materia
 areas = sorted(COMPONENTS_CATALOG.keys())
 default_area_index = 0
 if "CIENCIAS SOCIALES" in areas:
@@ -46,6 +57,7 @@ area = st.sidebar.selectbox(
     index=default_area_index
 )
 
+# Grado
 grado_num = st.sidebar.number_input(
     "Grado (número)",
     min_value=-2,
@@ -55,6 +67,7 @@ grado_num = st.sidebar.number_input(
     help="Convención: -2=Prejardín, -1=Jardín, 0=Transición, 1-11 básicos."
 )
 
+# Instancias por desempeño (control directo del usuario)
 ivs_per_des = st.sidebar.number_input(
     "Instancias por desempeño",
     min_value=1,
@@ -66,7 +79,7 @@ ivs_per_des = st.sidebar.number_input(
 
 st.sidebar.markdown("---")
 st.sidebar.caption(
-    "Cuando presiones **Generar**, se llamará varias veces a la API de OpenAI "
+    "Al presionar **Generar**, se llama varias veces a la API de OpenAI "
     "para parsear, generar instancias, componentes y rúbricas."
 )
 
@@ -111,10 +124,24 @@ if st.button("🚀 Generar instancias y rúbricas"):
             else:
                 st.success(f"Se generaron {len(df)} filas.")
 
+                # ---------- Guardar en Excel maestro en Drive ----------
+                try:
+                    total = append_to_excel(DRIVE_EXCEL_PATH, df, sheet_name=SHEET_NAME)
+                    st.info(
+                        f"✅ Archivo maestro actualizado en Drive:\n\n"
+                        f"`{DRIVE_EXCEL_PATH}`\n\n"
+                        f"Filas totales en la hoja '{SHEET_NAME}': {total}"
+                    )
+                except Exception as e:
+                    st.error(
+                        f"⚠️ No se pudo actualizar el Excel maestro en '{DRIVE_EXCEL_PATH}': {e}"
+                    )
+
+                # ---------- Vista previa ----------
                 st.subheader("3. Vista previa de resultados")
                 st.dataframe(df, use_container_width=True)
 
-                # ---- Excel para descargar ----
+                # ---------- Excel para descargar ----------
                 buffer = BytesIO()
                 with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
                     df.to_excel(writer, index=False, sheet_name="Instancias")

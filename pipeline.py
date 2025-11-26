@@ -12,7 +12,9 @@ import pandas as pd
 from openai import OpenAI
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# ---------- Modelos ----------
+# =========================================================
+# Configuración de modelos OpenAI
+# =========================================================
 MODEL_PARSE    = "gpt-5-mini"
 MODEL_CLASSIFY = "gpt-5-mini"
 RUBRIC_MODEL   = "gpt-5-mini"
@@ -40,7 +42,7 @@ def get_client() -> OpenAI:
     if not api_key:
         raise RuntimeError(
             "No se encontró OPENAI_API_KEY en las variables de entorno. "
-            "Configúrala antes de ejecutar el pipeline."
+            "Configúrala (por ejemplo en Streamlit secrets o variables de entorno) antes de ejecutar el pipeline."
         )
     return OpenAI(api_key=api_key)
 
@@ -537,8 +539,8 @@ def _override_target_from_map(code: str, title: str = "") -> Optional[int]:
 
 def ivs_per_des_by_unit_rule(n_desempenos: int) -> int:
     """
-    Regla original:
-    1–2 ⇒ 4; 3 ⇒ 3; 4+ ⇒ 2 (IV por desempeño).
+    Regla por defecto:
+    1–2 ⇒ 4; 3 ⇒ 3; 4+ ⇒ 2 (IV por desempeño)
     Se usa SOLO si el usuario no define explícitamente la cantidad.
     """
     if n_desempenos <= 2:
@@ -581,8 +583,7 @@ def enforce_iv_targets_by_unit(
     """
     Ajusta la cantidad de instancias por desempeño.
 
-    - Si ivs_per_des_user no es None, se fuerza esa cantidad para TODOS los desempeños
-      (salvo que quieras respetar overrides manuales, que aquí se ignoran).
+    - Si ivs_per_des_user no es None, se fuerza esa cantidad para TODOS los desempeños.
     - Si es None, se usa la regla por unidad (ivs_per_des_by_unit_rule) + overrides.
     """
     n_des = len(desempenos)
@@ -627,16 +628,12 @@ def _heuristic_components(area: str, texto: str, allowed: List[Dict[str, Any]]) 
 
     area_up = (area or "").strip().upper()
     if area_up in ("COMUNICACIÓN", "COMUNICACION"):
-        # Producción Escrita
         if any(w in t for w in ["escribe", "escrit", "trazo", "garabato", "graf", "dibujo", "pseudoletra"]):
             codes.append("E")
-        # Comprensión Auditiva
         if any(w in t for w in ["escucha", "escuchar", "instruccion", "instrucción", "oye", "oír", "auditiv", "canción", "ronda"]):
             codes.append("A")
-        # Comprensión Lectora
         if any(w in t for w in ["lee", "lectura", "cuento", "libro", "texto visual", "imagen"]):
             codes.append("L")
-        # Producción Oral
         if any(w in t for w in ["habla", "hablar", "oral", "narra", "narrar", "expresa", "convers", "contar"]):
             codes.append("O")
 
@@ -692,7 +689,6 @@ def llm_pick_components_for_instance(
         if len(comps) >= max_k:
             break
 
-    # Fallback heurístico
     if not comps:
         texto_ref = f"{ev_text or ''} {desempeno or ''}"
         comps = _heuristic_components(area, texto_ref, allowed)
@@ -751,11 +747,9 @@ def detect_language_for_text(area: str, ev_text: str, desempeno: str) -> str:
         return "es"
     text_low = text.lower()
 
-    # Regla fuerte
     if re.match(r"^\s*to\s+[a-z]", text_low):
         return "en"
 
-    # Tildes o ñ -> muy probable español
     if re.search(r"[áéíóúñü]", text_low):
         return "es"
 
@@ -1068,14 +1062,18 @@ def rubric_from_evidence(ev_text: str, desempeno: str, comps: list, area: str) -
         "descripcion_alto":   descr_alto,
         "comentario_bajo":    fb_bajo,
         "comentario_minimo":  fb_minimo,
-        "comentario_medio":   fb_medio,
+        "comentario_medio":  fb_medio,
         "comentario_alto":    fb_alto,
     }
 
 # =========================================================
-# Excel (utilidad opcional, no usada por Streamlit)
+# Excel local (solo utilidad; no persistente en Streamlit Cloud)
 # =========================================================
 def append_to_excel(output_path: str, df_new: pd.DataFrame, sheet_name: str = "Instancias") -> int:
+    """
+    Útil si corres localmente y quieres un Excel acumulado en disco.
+    En Streamlit Cloud normalmente no será persistente entre reinicios.
+    """
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -1116,6 +1114,89 @@ def append_to_excel(output_path: str, df_new: pd.DataFrame, sheet_name: str = "I
         }
         for i, col in enumerate(df_all.columns):
             ws.set_column(i, i, widths.get(col, 18))
+    return len(df_all)
+
+# =========================================================
+# Google Sheets (persistencia en tu hoja de Drive)
+# =========================================================
+def append_to_gsheet(
+    df_new: pd.DataFrame,
+    spreadsheet_id: str,
+    worksheet_gid: int,
+    subset_cols: Optional[list] = None
+) -> int:
+    """
+    Agrega/actualiza datos en una hoja de Google Sheets.
+
+    Uso pensado para Streamlit Cloud / servidor:
+    - Se espera un service account JSON en la variable de entorno GCP_SERVICE_ACCOUNT_JSON.
+      (Colócalo en Streamlit secrets y cárgalo en esa variable, o léelo desde st.secrets.)
+
+    - La hoja debe estar compartida con el correo del service account.
+    """
+    import gspread
+    from gspread_dataframe import get_as_dataframe, set_with_dataframe
+    from google.oauth2.service_account import Credentials
+
+    sa_json = os.getenv("GCP_SERVICE_ACCOUNT_JSON")
+    if not sa_json:
+        raise RuntimeError(
+            "No se encontró GCP_SERVICE_ACCOUNT_JSON en las variables de entorno. "
+            "Debes configurar el JSON del service account para poder escribir en Google Sheets."
+        )
+
+    sa_info = json.loads(sa_json)
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive",
+    ]
+    creds = Credentials.from_service_account_info(sa_info, scopes=scopes)
+    gc = gspread.authorize(creds)
+
+    sh = gc.open_by_key(spreadsheet_id)
+
+    # Buscar la worksheet por gid
+    ws = None
+    for w in sh.worksheets():
+        if w.id == worksheet_gid:
+            ws = w
+            break
+    if ws is None:
+        raise ValueError(f"No encontré una pestaña con gid={worksheet_gid} en ese spreadsheet.")
+
+    # Leer lo existente como DataFrame
+    df_old = get_as_dataframe(ws, evaluate_formulas=False, header=0)
+
+    if df_old is None or df_old.empty:
+        df_all = df_new.copy()
+    else:
+        all_cols = list(dict.fromkeys(list(df_old.columns) + list(df_new.columns)))
+        df_old = df_old.reindex(columns=all_cols)
+        df_new = df_new.reindex(columns=all_cols)
+        df_all = pd.concat([df_old, df_new], ignore_index=True)
+
+    df_all = df_all.dropna(how="all")
+
+    if subset_cols is None:
+        subset_cols = [c for c in ["Desempeño_id", "Instancia Verificadora"] if c in df_all.columns]
+
+    if subset_cols:
+        df_all = df_all.drop_duplicates(subset=subset_cols, keep="first")
+    else:
+        df_all = df_all.drop_duplicates(keep="first")
+
+    if "Ítem" in df_all.columns:
+        df_all = df_all.drop(columns=["Ítem"])
+    df_all.insert(0, "Ítem", range(1, len(df_all) + 1))
+
+    set_with_dataframe(
+        ws,
+        df_all,
+        include_index=False,
+        include_column_header=True,
+        resize=True
+    )
+
     return len(df_all)
 
 # =========================================================
@@ -1231,7 +1312,6 @@ def run_pipeline(
     if ivs_per_desempeno <= 0:
         raise ValueError("La cantidad de instancias por desempeño debe ser mayor que 0.")
 
-    # 1) Partir en unidades
     units_list = split_unidades_dispatch(raw_text)
     units_by_u: Dict[int, str] = {}
     for u, ch in units_list:
@@ -1239,11 +1319,9 @@ def run_pipeline(
             if u not in units_by_u or len(ch) > len(units_by_u[u]):
                 units_by_u[u] = ch
 
-    # 2) Asegurar U1..U6 (ajustada a tu estructura original)
     for u in ALWAYS_UNITS:
         units_by_u.setdefault(u, "")
 
-    # 3) Parsear cada unidad y ajustar IV según la cantidad elegida por el usuario
     parsed_by_unit: Dict[int, Dict[str, Any]] = {}
     for u in sorted(units_by_u.keys()):
         parsed = parse_unidad_text(
@@ -1256,7 +1334,6 @@ def run_pipeline(
         )
         parsed_by_unit[u] = parsed
 
-    # 4) Si alguna unidad queda sin desempeños, replicar desde la unidad más cercana (pares con pares)
     def replicate_desempenos_from_nearest(unit: int) -> List[Dict[str,Any]]:
         candidates = sorted(parsed_by_unit.keys())
         preferred: List[int] = []
@@ -1282,7 +1359,6 @@ def run_pipeline(
                 "desempenos": replicate_desempenos_from_nearest(u)
             }
 
-    # 5) Construir filas
     area_inits = initials(area)
     rows_all: List[Dict[str, Any]] = []
 

@@ -6,7 +6,11 @@ import streamlit as st
 import pandas as pd
 from dotenv import load_dotenv
 
-from pipeline import run_pipeline, COMPONENTS_CATALOG, append_to_excel
+from pipeline import (
+    run_pipeline,
+    COMPONENTS_CATALOG,
+    append_to_gsheet,
+)
 
 load_dotenv()
 
@@ -21,13 +25,15 @@ st.write(
     "se generan instancias verificadoras, componentes y rúbricas por nivel."
 )
 
-# ----------------- Ruta fija en Drive -----------------
-# Es la misma que usabas en tu notebook original
-DRIVE_EXCEL_PATH = "/content/drive/MyDrive/Colab Notebooks/Arquitectura de evaluación/instancias_verificadoras.xlsx"
-SHEET_NAME = "Instancias"
+# ----------------- Configuración Google Sheet de destino -----------------
+# Esta es la hoja que compartiste:
+# https://docs.google.com/spreadsheets/d/1wPejY3e41MwMtr5Jn0xPEX15i73h3kDH/edit?gid=844244215#gid=844244215
+GSPREAD_SPREADSHEET_ID = "1wPejY3e41MwMtr5Jn0xPEX15i73h3kDH"
+GSPREAD_WORKSHEET_GID = 844244215  # pestaña específica
 
 st.caption(
-    f"⚙️ Los resultados se irán acumulando en el archivo maestro de Drive:\n\n`{DRIVE_EXCEL_PATH}`"
+    "Los resultados se acumularán en la pestaña de la Google Sheet configurada, "
+    "además de poder descargar el Excel generado."
 )
 
 # ----------------- Sidebar: configuración -----------------
@@ -39,7 +45,7 @@ api_key = st.sidebar.text_input(
     "OPENAI_API_KEY",
     type="password",
     value=default_key,
-    help="Tu clave de la API de OpenAI"
+    help="Tu clave de la API de OpenAI (puedes ponerla también en los secrets de Streamlit)."
 )
 
 if api_key:
@@ -67,7 +73,7 @@ grado_num = st.sidebar.number_input(
     help="Convención: -2=Prejardín, -1=Jardín, 0=Transición, 1-11 básicos."
 )
 
-# Instancias por desempeño (control directo del usuario)
+# Instancias por desempeño
 ivs_per_des = st.sidebar.number_input(
     "Instancias por desempeño",
     min_value=1,
@@ -79,8 +85,8 @@ ivs_per_des = st.sidebar.number_input(
 
 st.sidebar.markdown("---")
 st.sidebar.caption(
-    "Al presionar **Generar**, se llama varias veces a la API de OpenAI "
-    "para parsear, generar instancias, componentes y rúbricas."
+    "Al presionar **Generar**, se llama a la API de OpenAI para parsear el texto, "
+    "generar instancias, clasificar componentes y construir rúbricas."
 )
 
 # ----------------- Entrada de texto -----------------
@@ -107,7 +113,7 @@ st.subheader("2. Procesar")
 
 if st.button("🚀 Generar instancias y rúbricas"):
     if not api_key:
-        st.error("Debes ingresar tu OPENAI_API_KEY en la barra lateral.")
+        st.error("Debes ingresar tu OPENAI_API_KEY en la barra lateral o en las variables de entorno.")
     elif not raw_text or not raw_text.strip():
         st.error("Debes pegar o subir algún texto.")
     else:
@@ -124,18 +130,20 @@ if st.button("🚀 Generar instancias y rúbricas"):
             else:
                 st.success(f"Se generaron {len(df)} filas.")
 
-                # ---------- Guardar en Excel maestro en Drive ----------
+                # ---------- Actualizar Google Sheet ----------
                 try:
-                    total = append_to_excel(DRIVE_EXCEL_PATH, df, sheet_name=SHEET_NAME)
-                    st.info(
-                        f"✅ Archivo maestro actualizado en Drive:\n\n"
-                        f"`{DRIVE_EXCEL_PATH}`\n\n"
-                        f"Filas totales en la hoja '{SHEET_NAME}': {total}"
+                    total_gs = append_to_gsheet(
+                        df_new=df,
+                        spreadsheet_id=GSPREAD_SPREADSHEET_ID,
+                        worksheet_gid=GSPREAD_WORKSHEET_GID,
+                    )
+                    st.success(
+                        f"✅ Google Sheet actualizada correctamente.\n\n"
+                        f"ID: `{GSPREAD_SPREADSHEET_ID}`, gid: `{GSPREAD_WORKSHEET_GID}`\n"
+                        f"Filas totales ahora en esa pestaña: {total_gs}"
                     )
                 except Exception as e:
-                    st.error(
-                        f"⚠️ No se pudo actualizar el Excel maestro en '{DRIVE_EXCEL_PATH}': {e}"
-                    )
+                    st.error(f"⚠️ No se pudo actualizar la Google Sheet: {e}")
 
                 # ---------- Vista previa ----------
                 st.subheader("3. Vista previa de resultados")

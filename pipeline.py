@@ -265,6 +265,11 @@ COMPONENTS_CATALOG: Dict[str, List[Dict[str, Any]]] = {
         {"code": "PE", "name":"Pensamiento espacial",       "stage":"Todas"},
         {"code": "PA", "name":"Pensamiento aleatorio",      "stage":"Todas"},
     ],
+    "JUNIOR HIGH LEADERSHIP": [
+        {"code": "ARP","name":"Autoreconocimiento y propósito", "stage":"Conexión"},
+        {"code": "GEHS","name":"Gestión emocional y hábitos efectivos para el servicio",        "stage":"Conexión"},
+        {"code": "CLI", "name":"Comunicación y liderazgo individual",       "stage":"Conexión"},
+    ],
     "INDAGACIÓN": [
         {"code": "IN", "name":"Primeros pasos en indagación",                        "stage":"Descubrimiento"},
         {"code": "EX", "name":"Exploración inicial",                                  "stage":"Descubrimiento"},
@@ -299,6 +304,7 @@ PARSE_SYSTEM = (
     "Tu salida DEBE ser SOLO JSON válido. "
     "Extrae la UNIDAD (si está) y una lista de DESEMPEÑOS. "
     "Para cada desempeño, genera instancias verificadoras OBSERVACIONALES, sin cuantificar, "
+    "Si encuentras que hay un desempeño precisado para dos unidades, manten el desempeño igual pero que las intancias verificadoras tengan un incremental en exigencia de cara al estudiante"
     "manteniendo el mismo idioma del texto fuente (si el texto está en inglés, escribe en inglés; "
     "si está en español, escribe en español)."
 )
@@ -310,7 +316,7 @@ Reglas para Instancias Verificadoras (observacionales):
 - Una acción principal por ítem (máx. 2 cláusulas).
 - Verbo observable al inicio (p. ej., 'identifica', 'describe', 'relaciona', 'organiza', 'recita', 'lee', 'escribe').
 - Sin microdetalles ni criterios de corrección dentro del ítem.
-- Genera exactamente {N} instancias verificadoras por cada desempeño, diferenciadas entre sí (no repitas la misma acción con sinónimos).
+- Genera exactamente {N} instancias verificadoras por cada desempeño, diferenciadas entre sí (no repitas la misma acción con sinónimos), incluso cuando un desempeño se igual entre unidades.
 """
 
 PARSE_USER_TMPL_PREFIX = (
@@ -1396,3 +1402,4 @@ def run_pipeline(
     df.insert(0, "Ítem", range(1, len(df) + 1))
 
     return df
+
